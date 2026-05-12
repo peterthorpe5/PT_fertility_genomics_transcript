@@ -4,7 +4,8 @@ set -euo pipefail
 WORKDIR="/home/pthorpe001/data/2026_sperm_Gates_transcript_level"
 GTEX_DIR="${WORKDIR}/GTEx"
 OUT_DIR="${WORKDIR}/results/01_gtex_transcript_isoform_first_pass"
-SCRIPT_DIR="${WORKDIR}/scripts/gtex_transcript_isoform_first_pass/scripts"
+SCRIPT_DIR="${WORKDIR}/PT_fertility_genomics_transcript/scripts"
+
 
 mkdir -p "${OUT_DIR}"
 
