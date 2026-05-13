@@ -266,6 +266,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> Config:
         help="GTEx gene TPM GCT/GCT.GZ file used to map gene IDs to symbols.",
     )
     parser.add_argument(
+        "--max_target_usage_rank",
+        type=int,
+        default=3,
+        help=(
+            "Maximum within-gene target-tissue isoform-usage rank to keep "
+            "in the candidate transcript table. Default: 3."
+        ),
+    )
+    parser.add_argument(
         "--sample_attributes",
         required=True,
         type=Path,
@@ -1278,16 +1287,32 @@ def summarise_transcript_target_tissue(
         validate="many_to_one",
     )
 
-    summary["is_target_tissue_isoform_candidate"] = (
+    candidate_mask = (
         (summary["target_median_tpm"] >= min_target_tpm_candidate)
         & (summary["target_median_isoform_usage"] >= min_target_usage_candidate)
         & (
             summary["log2_target_vs_max_non_target_isoform_usage"]
             >= min_log2_usage_ratio_candidate
         )
-        & (summary["target_usage_rank_within_gene"] == 1)
+        & (summary["target_usage_rank_within_gene"] <= 3)
         & (summary["target_is_max_usage_tissue"] == 1)
-    ).astype(int)
+    )
+
+    summary["is_target_tissue_isoform_candidate"] = candidate_mask.astype(int)
+
+    summary["candidate_rank_tier"] = "not_candidate"
+
+    summary.loc[
+        candidate_mask & (summary["target_usage_rank_within_gene"] == 1),
+        "candidate_rank_tier",
+    ] = "primary_rank_1"
+
+    summary.loc[
+        candidate_mask
+        & (summary["target_usage_rank_within_gene"] > 1)
+        & (summary["target_usage_rank_within_gene"] <= 3),
+        "candidate_rank_tier",
+    ] = "secondary_rank_2_to_3"
 
     summary["is_broad_gene_isoform_rescue_candidate"] = (
         (summary["is_target_tissue_isoform_candidate"] == 1)
@@ -1297,14 +1322,21 @@ def summarise_transcript_target_tissue(
         )
     ).astype(int)
 
+
     sort_cols = [
         "is_broad_gene_isoform_rescue_candidate",
         "is_target_tissue_isoform_candidate",
+        "target_usage_rank_within_gene",
         "log2_target_vs_max_non_target_isoform_usage",
         "target_median_isoform_usage",
         "target_median_tpm",
     ]
-    summary = summary.sort_values(by=sort_cols, ascending=[False] * len(sort_cols))
+
+    summary = summary.sort_values(
+        by=sort_cols,
+        ascending=[False, False, True, False, False, False],
+    )
+
     logger.info(
         "Transcript summary contains %d target-tissue candidates and %d broad-gene rescue candidates",
         int(summary["is_target_tissue_isoform_candidate"].sum()),
