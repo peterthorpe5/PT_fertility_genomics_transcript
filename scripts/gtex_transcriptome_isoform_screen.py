@@ -132,9 +132,11 @@ class Config:
     max_gene_log2_ratio_for_rescue: float
     top_n_candidate_tissues: int
     write_tissue_matrices: bool
+    write_excel_outputs: bool
     log_path: Optional[Path]
     log_level: str
     epsilon: float = 1e-8
+
 
 
 @dataclass(frozen=True)
