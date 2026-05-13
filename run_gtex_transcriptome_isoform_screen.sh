@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
+#$ -cwd
+#$ -j y
+#$ -jc long
+#$ -mods l_hard mfree 300G
+#$ -adds l_hard h_vmem 300G
+#$ -N trans_wide
 set -euo pipefail
 
 WORKDIR="/home/pthorpe001/data/2026_sperm_Gates_transcript_level"
 GTEX_DIR="${WORKDIR}/GTEx"
 SCRIPT_DIR="${WORKDIR}/PT_fertility_genomics_transcript/scripts"
-OUT_DIR="${WORKDIR}/results/01_gtex_transcript_isoform_first_pass"
+OUT_DIR="${WORKDIR}/results/01_gtex_transcript_isoform_first_pass_top3"
 LOG_DIR="${OUT_DIR}/logs"
 
 mkdir -p "${OUT_DIR}" "${LOG_DIR}"
