@@ -362,6 +362,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> Config:
             "searchable summary and candidate files are still written."
         ),
     )
+
+    parser.add_argument(
+        "--write_excel_outputs",
+        action="store_true",
+        help=(
+            "Write formatted Excel copies of the main summary/result tables. "
+            "The large tissue-median matrix outputs are not written to Excel."
+        ),
+    )
     parser.add_argument(
         "--log_path",
         type=Path,
@@ -392,6 +401,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> Config:
         max_gene_log2_ratio_for_rescue=args.max_gene_log2_ratio_for_rescue,
         top_n_candidate_tissues=args.top_n_candidate_tissues,
         write_tissue_matrices=not args.skip_tissue_matrices,
+        write_excel_outputs=args.write_excel_outputs,
         log_path=args.log_path,
         log_level=args.log_level,
     )
@@ -1517,6 +1527,237 @@ def write_tsv(*, dataframe: pd.DataFrame, path: Path, logger: logging.Logger) ->
     logger.info("Wrote %d rows x %d columns to %s", dataframe.shape[0], dataframe.shape[1], path)
 
 
+def make_safe_excel_sheet_name(*, sheet_name: str) -> str:
+    """
+    Make a safe Excel worksheet name.
+
+    Excel worksheet names must be 31 characters or fewer and cannot contain
+    several special characters.
+
+    Parameters
+    ----------
+    sheet_name
+        Proposed worksheet name.
+
+    Returns
+    -------
+    str
+        Safe worksheet name.
+    """
+    invalid_characters = ["[", "]", ":", "*", "?", "/", "\\"]
+    safe_name = sheet_name
+
+    for invalid_character in invalid_characters:
+        safe_name = safe_name.replace(invalid_character, "_")
+
+    safe_name = safe_name.strip()
+    if not safe_name:
+        safe_name = "results"
+
+    return safe_name[:31]
+
+
+def estimate_excel_column_widths(
+    *,
+    dataframe: pd.DataFrame,
+    max_scan_rows: int = 2000,
+    min_width: int = 8,
+    max_text_width: int = 48,
+    max_numeric_width: int = 18,
+) -> Dict[str, int]:
+    """
+    Estimate readable Excel column widths.
+
+    Widths are based on the column name and a scan of the first rows of the
+    DataFrame. Text columns are capped more generously than numeric columns.
+
+    Parameters
+    ----------
+    dataframe
+        DataFrame to inspect.
+    max_scan_rows
+        Maximum number of rows to scan for width estimation.
+    min_width
+        Minimum Excel column width.
+    max_text_width
+        Maximum width for text-like columns.
+    max_numeric_width
+        Maximum width for numeric columns.
+
+    Returns
+    -------
+    Dict[str, int]
+        Mapping from column name to Excel column width.
+    """
+    widths = {}
+
+    scan_dataframe = dataframe.head(n=max_scan_rows)
+
+    for column in dataframe.columns:
+        header_width = len(str(column)) + 2
+
+        if scan_dataframe.empty:
+            value_width = 0
+        else:
+            value_width = (
+                scan_dataframe[column]
+                .astype(str)
+                .replace(to_replace="nan", value="")
+                .str.len()
+                .max()
+            )
+
+        if pd.isna(value_width):
+            value_width = 0
+
+        raw_width = max(header_width, int(value_width) + 2)
+
+        if pd.api.types.is_numeric_dtype(dataframe[column]):
+            width = min(max(raw_width, min_width), max_numeric_width)
+        else:
+            width = min(max(raw_width, min_width), max_text_width)
+
+        widths[str(column)] = width
+
+    return widths
+
+
+def write_formatted_excel(
+    *,
+    dataframe: pd.DataFrame,
+    path: Path,
+    sheet_name: str,
+    logger: logging.Logger,
+) -> None:
+    """
+    Write a formatted Excel copy of a result table.
+
+    The workbook includes a frozen header row, filter/sort drop-downs via an
+    Excel table, readable column widths, and basic numeric formatting.
+
+    Parameters
+    ----------
+    dataframe
+        DataFrame to write.
+    path
+        Output XLSX path.
+    sheet_name
+        Worksheet name.
+    logger
+        Logger instance.
+    """
+    excel_max_rows = 1_048_576
+    excel_max_cols = 16_384
+
+    n_rows, n_cols = dataframe.shape
+
+    if n_rows + 1 > excel_max_rows:
+        logger.warning(
+            "Skipping Excel output for %s because it has %d rows, which "
+            "exceeds the Excel worksheet limit.",
+            path,
+            n_rows,
+        )
+        return
+
+    if n_cols > excel_max_cols:
+        logger.warning(
+            "Skipping Excel output for %s because it has %d columns, which "
+            "exceeds the Excel worksheet limit.",
+            path,
+            n_cols,
+        )
+        return
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe_sheet_name = make_safe_excel_sheet_name(sheet_name=sheet_name)
+
+    try:
+        with pd.ExcelWriter(path=path, engine="xlsxwriter") as writer:
+            dataframe.to_excel(
+                excel_writer=writer,
+                sheet_name=safe_sheet_name,
+                index=False,
+            )
+
+            workbook = writer.book
+            worksheet = writer.sheets[safe_sheet_name]
+
+            header_format = workbook.add_format(
+                properties={
+                    "bold": True,
+                    "text_wrap": True,
+                    "valign": "top",
+                    "border": 1,
+                }
+            )
+            integer_format = workbook.add_format(
+                properties={
+                    "num_format": "0",
+                }
+            )
+            float_format = workbook.add_format(
+                properties={
+                    "num_format": "0.0000",
+                }
+            )
+
+            worksheet.freeze_panes(row=1, col=0)
+
+            if n_cols > 0:
+                table_columns = [
+                    {"header": str(column)}
+                    for column in dataframe.columns
+                ]
+                worksheet.add_table(
+                    first_row=0,
+                    first_col=0,
+                    last_row=n_rows,
+                    last_col=n_cols - 1,
+                    options={
+                        "columns": table_columns,
+                        "style": "Table Style Medium 2",
+                        "autofilter": True,
+                    },
+                )
+
+            worksheet.set_row(row=0, height=30, cell_format=header_format)
+
+            column_widths = estimate_excel_column_widths(dataframe=dataframe)
+
+            for column_index, column in enumerate(dataframe.columns):
+                column_width = column_widths[str(column)]
+
+                if pd.api.types.is_integer_dtype(dataframe[column]):
+                    cell_format = integer_format
+                elif pd.api.types.is_float_dtype(dataframe[column]):
+                    cell_format = float_format
+                else:
+                    cell_format = None
+
+                worksheet.set_column(
+                    first_col=column_index,
+                    last_col=column_index,
+                    width=column_width,
+                    cell_format=cell_format,
+                )
+
+    except ImportError as error:
+        logger.warning(
+            "Could not write Excel output %s because the xlsxwriter engine "
+            "is not installed: %s",
+            path,
+            error,
+        )
+        return
+
+    logger.info(
+        "Wrote formatted Excel file with %d rows x %d columns to %s",
+        n_rows,
+        n_cols,
+        path,
+    )
+
 def run(*, config: Config, logger: logging.Logger) -> None:
     """
     Run the full transcriptome-wide isoform screen.
@@ -1723,6 +1964,34 @@ def run(*, config: Config, logger: logging.Logger) -> None:
             path=Path(f"{prefix}.best_candidate_isoform_per_gene.tsv"),
             logger=logger,
         )
+
+        if config.write_excel_outputs:
+            write_formatted_excel(
+                dataframe=gene_summary,
+                path=Path(f"{prefix}.gene_target_tissue_summary.xlsx"),
+                sheet_name="gene_target_tissue_summary",
+                logger=logger,
+            )
+            write_formatted_excel(
+                dataframe=transcript_summary,
+                path=Path(
+                    f"{prefix}.transcript_target_tissue_isoform_summary.xlsx"
+                ),
+                sheet_name="transcript_isoform_summary",
+                logger=logger,
+            )
+            write_formatted_excel(
+                dataframe=candidates,
+                path=Path(f"{prefix}.candidate_target_tissue_isoforms.xlsx"),
+                sheet_name="candidate_isoforms",
+                logger=logger,
+            )
+            write_formatted_excel(
+                dataframe=best_per_gene,
+                path=Path(f"{prefix}.best_candidate_isoform_per_gene.xlsx"),
+                sheet_name="best_isoform_per_gene",
+                logger=logger,
+            )
 
     logger.info("GTEx transcriptome-wide isoform screen finished")
 

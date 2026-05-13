@@ -28,5 +28,6 @@ python "${SCRIPT_DIR}/gtex_transcriptome_isoform_screen.py" \
   --min_target_usage_candidate 0.25 \
   --min_log2_usage_ratio_candidate 1 \
   --max_gene_log2_ratio_for_rescue 1 \
+  --write_excel_outputs \
   --log_path "${LOG_DIR}/gtex_v11_transcriptome_testis_isoform_screen.log" \
   --log_level "INFO"
