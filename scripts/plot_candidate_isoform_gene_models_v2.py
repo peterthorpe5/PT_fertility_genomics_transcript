@@ -238,15 +238,31 @@ def normalise_features(*, dataframe: pd.DataFrame) -> pd.DataFrame:
     columns = dataframe.columns
     gene_symbol_col = first_present_column(
         columns=columns,
-        candidates=("gene_symbol", "gene_name", "gene"),
+        candidates=(
+            "gene_symbol",
+            "gene_name",
+            "gene",
+            "gencode_gene_name",
+        ),
         required=False,
     )
     gene_id_col = first_present_column(
-        columns=columns, candidates=("gene_id", "gene_id_with_version")
+        columns=columns, candidates=(
+            "gene_id",
+            "gene_id_with_version",
+            "gencode_gene_id",
+            "gencode_gene_id_with_version",
+        )
     )
     transcript_id_col = first_present_column(
         columns=columns,
-        candidates=("transcript_id", "transcript_stable_id", "transcript"),
+        candidates=(
+            "transcript_id",
+            "transcript_stable_id",
+            "transcript",
+            "gencode_transcript_id",
+            "gencode_transcript_id_with_version",
+        ),
     )
     transcript_id_version_col = first_present_column(
         columns=columns,
@@ -254,27 +270,57 @@ def normalise_features(*, dataframe: pd.DataFrame) -> pd.DataFrame:
             "transcript_id_with_version",
             "transcript_id_versioned",
             "transcript_id_full",
+            "gencode_transcript_id_with_version",
+            "gencode_transcript_id",
             transcript_id_col,
         ),
     )
     transcript_name_col = first_present_column(
         columns=columns,
-        candidates=("transcript_name", "transcript_label"),
+        candidates=(
+            "transcript_name",
+            "transcript_label",
+            "gencode_transcript_name",
+        ),
         required=False,
     )
     feature_col = first_present_column(
-        columns=columns, candidates=("feature", "feature_type", "type")
+        columns=columns, candidates=(
+            "feature",
+            "feature_type",
+            "type",
+            "gencode_feature_type",
+        )
     )
     seqname_col = first_present_column(
-        columns=columns, candidates=("seqname", "chromosome", "chrom", "contig")
+        columns=columns, candidates=(
+            "seqname",
+            "chromosome",
+            "chrom",
+            "contig",
+            "gencode_seqname",
+        )
     )
     start_col = first_present_column(
-        columns=columns, candidates=("start", "feature_start", "genomic_start")
+        columns=columns, candidates=(
+            "start",
+            "feature_start",
+            "genomic_start",
+            "gencode_start",
+        )
     )
     end_col = first_present_column(
-        columns=columns, candidates=("end", "feature_end", "genomic_end")
+        columns=columns, candidates=(
+            "end",
+            "feature_end",
+            "genomic_end",
+            "gencode_end",
+        )
     )
-    strand_col = first_present_column(columns=columns, candidates=("strand",))
+    strand_col = first_present_column(
+        columns=columns,
+        candidates=("strand", "gencode_strand"),
+    )
 
     if gene_symbol_col is None:
         gene_symbols = pd.Series([""] * dataframe.shape[0], index=dataframe.index)
@@ -330,7 +376,13 @@ def normalise_candidates(*, dataframe: pd.DataFrame) -> pd.DataFrame:
     )
     transcript_id_col = first_present_column(
         columns=columns,
-        candidates=("transcript_id", "transcript_stable_id", "transcript"),
+        candidates=(
+            "transcript_id",
+            "transcript_stable_id",
+            "transcript",
+            "gencode_transcript_id",
+            "gencode_transcript_id_with_version",
+        ),
     )
     transcript_id_version_col = first_present_column(
         columns=columns,
@@ -338,12 +390,19 @@ def normalise_candidates(*, dataframe: pd.DataFrame) -> pd.DataFrame:
             "transcript_id_with_version",
             "transcript_id_versioned",
             "transcript_id_full",
+            "gencode_transcript_id_with_version",
+            "gencode_transcript_id",
             transcript_id_col,
         ),
     )
     gene_id_col = first_present_column(
         columns=columns,
-        candidates=("gene_id", "gene_id_with_version"),
+        candidates=(
+            "gene_id",
+            "gene_id_with_version",
+            "gencode_gene_id",
+            "gencode_gene_id_with_version",
+        ),
         required=False,
     )
     if gene_id_col is None:
