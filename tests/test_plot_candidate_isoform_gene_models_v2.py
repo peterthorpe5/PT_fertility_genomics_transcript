@@ -11,6 +11,7 @@ import pandas as pd
 
 from scripts.plot_candidate_isoform_gene_models_v2 import (
     choose_transcripts,
+    get_gene_features_for_plot,
     make_candidate_lookup,
     merge_intervals,
     normalise_candidates,
@@ -104,6 +105,24 @@ class TestEnhancedGeneModelPlots(unittest.TestCase):
         self.assertEqual(features.loc[0, "gene_id"], "ENSG1")
         self.assertEqual(features.loc[0, "transcript_id"], "ENST1")
         self.assertEqual(set(features["feature"]), {"exon", "cds"})
+
+
+    def test_recover_features_when_gene_symbol_missing(self) -> None:
+        """Feature rows can be recovered from candidates when symbols are absent."""
+        raw_without_symbol = self.features_raw.drop(columns=["gene_name"])
+        features = normalise_features(dataframe=raw_without_symbol)
+        candidates = normalise_candidates(dataframe=self.candidates_raw)
+        logger = logging.getLogger("test_feature_recovery")
+        logger.handlers = []
+        logger.addHandler(logging.NullHandler())
+        gene_features = get_gene_features_for_plot(
+            gene_symbol="GENE1",
+            features=features,
+            candidates=candidates,
+            logger=logger,
+        )
+        self.assertEqual(gene_features.shape[0], self.features_raw.shape[0])
+        self.assertEqual(set(gene_features["gene_symbol"]), {"GENE1"})
 
     def test_candidate_priority(self) -> None:
         """Primary and secondary candidates are prioritised in track order."""

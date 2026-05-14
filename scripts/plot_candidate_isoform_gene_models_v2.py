@@ -220,6 +220,11 @@ def normalise_features(*, dataframe: pd.DataFrame) -> pd.DataFrame:
     """
     Normalise a GENCODE-derived feature table.
 
+    The feature table may not always contain a gene-symbol column. This can
+    happen when the feature output was written as a compact coordinate table.
+    In that case, gene symbols are recovered later from the candidate table
+    using gene IDs or candidate transcript IDs.
+
     Parameters
     ----------
     dataframe
@@ -232,7 +237,9 @@ def normalise_features(*, dataframe: pd.DataFrame) -> pd.DataFrame:
     """
     columns = dataframe.columns
     gene_symbol_col = first_present_column(
-        columns=columns, candidates=("gene_symbol", "gene_name", "gene")
+        columns=columns,
+        candidates=("gene_symbol", "gene_name", "gene"),
+        required=False,
     )
     gene_id_col = first_present_column(
         columns=columns, candidates=("gene_id", "gene_id_with_version")
@@ -269,9 +276,14 @@ def normalise_features(*, dataframe: pd.DataFrame) -> pd.DataFrame:
     )
     strand_col = first_present_column(columns=columns, candidates=("strand",))
 
+    if gene_symbol_col is None:
+        gene_symbols = pd.Series([""] * dataframe.shape[0], index=dataframe.index)
+    else:
+        gene_symbols = dataframe[gene_symbol_col].fillna("").astype(str)
+
     output = pd.DataFrame(
         {
-            "gene_symbol": dataframe[gene_symbol_col].fillna("").astype(str),
+            "gene_symbol": gene_symbols,
             "gene_id": dataframe[gene_id_col].map(
                 lambda value: strip_ensembl_version(identifier=value)
             ),
@@ -329,9 +341,21 @@ def normalise_candidates(*, dataframe: pd.DataFrame) -> pd.DataFrame:
             transcript_id_col,
         ),
     )
+    gene_id_col = first_present_column(
+        columns=columns,
+        candidates=("gene_id", "gene_id_with_version"),
+        required=False,
+    )
+    if gene_id_col is None:
+        gene_ids = pd.Series([""] * dataframe.shape[0], index=dataframe.index)
+    else:
+        gene_ids = dataframe[gene_id_col].map(
+            lambda value: strip_ensembl_version(identifier=value)
+        )
     output = pd.DataFrame(
         {
             "gene_symbol": dataframe[gene_symbol_col].fillna("").astype(str),
+            "gene_id": gene_ids,
             "transcript_id_with_version": dataframe[
                 transcript_id_version_col
             ].fillna("").astype(str),
@@ -643,6 +667,96 @@ def draw_boxes(
         )
 
 
+def get_gene_features_for_plot(
+    *, gene_symbol: str, features: pd.DataFrame, candidates: pd.DataFrame,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """
+    Resolve feature rows for a requested gene symbol.
+
+    The GENCODE feature table may not contain a gene-symbol column. When that
+    happens, this function uses the candidate table to identify the gene ID or
+    candidate transcript IDs for the requested gene, then returns all feature
+    rows from the same gene locus.
+
+    Parameters
+    ----------
+    gene_symbol
+        Requested gene symbol.
+    features
+        Standardised feature table.
+    candidates
+        Standardised candidate table.
+    logger
+        Logger instance.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Feature rows for the requested gene.
+    """
+    direct_matches = features[features["gene_symbol"] == gene_symbol].copy()
+    if not direct_matches.empty:
+        return direct_matches
+
+    gene_candidates = candidates[candidates["gene_symbol"] == gene_symbol].copy()
+    if gene_candidates.empty:
+        logger.warning(
+            "No candidate rows found for %s; cannot recover features by gene ID",
+            gene_symbol,
+        )
+        return direct_matches
+
+    gene_ids = {
+        str(value).strip()
+        for value in gene_candidates.get("gene_id", pd.Series(dtype=str))
+        if str(value).strip()
+    }
+
+    candidate_transcript_ids = set()
+    for column in ("transcript_id", "transcript_id_with_version"):
+        if column in gene_candidates.columns:
+            candidate_transcript_ids.update(
+                str(value).strip()
+                for value in gene_candidates[column]
+                if str(value).strip()
+            )
+            candidate_transcript_ids.update(
+                strip_ensembl_version(identifier=value)
+                for value in gene_candidates[column]
+                if str(value).strip()
+            )
+
+    if candidate_transcript_ids:
+        matched_candidate_features = features[
+            features["transcript_id"].isin(candidate_transcript_ids)
+            | features["transcript_id_with_version"].isin(candidate_transcript_ids)
+        ]
+        gene_ids.update(
+            str(value).strip()
+            for value in matched_candidate_features["gene_id"]
+            if str(value).strip()
+        )
+
+    if not gene_ids:
+        logger.warning(
+            "Could not infer a gene ID for %s from candidate transcripts",
+            gene_symbol,
+        )
+        return direct_matches
+
+    resolved = features[features["gene_id"].isin(gene_ids)].copy()
+    if not resolved.empty:
+        resolved["gene_symbol"] = gene_symbol
+        logger.info(
+            "Recovered %d feature rows for %s using gene IDs: %s",
+            resolved.shape[0],
+            gene_symbol,
+            ", ".join(sorted(gene_ids)),
+        )
+    return resolved
+
+
 def plot_gene_model(
     *, gene_symbol: str, features: pd.DataFrame, candidates: pd.DataFrame,
     out_dir: Path, output_formats: Sequence[str], out_suffix: str,
@@ -677,7 +791,12 @@ def plot_gene_model(
     logger
         Logger instance.
     """
-    gene_features = features[features["gene_symbol"] == gene_symbol].copy()
+    gene_features = get_gene_features_for_plot(
+        gene_symbol=gene_symbol,
+        features=features,
+        candidates=candidates,
+        logger=logger,
+    )
     if gene_features.empty:
         logger.warning("No features found for %s", gene_symbol)
         return
