@@ -169,6 +169,7 @@ class TestGtexTranscriptomeIsoformScreen(unittest.TestCase):
                 max_gene_log2_ratio_for_rescue=1.0,
                 top_n_candidate_tissues=3,
                 write_tissue_matrices=True,
+                write_excel_outputs=False,
                 log_path=None,
                 log_level="CRITICAL",
             )
