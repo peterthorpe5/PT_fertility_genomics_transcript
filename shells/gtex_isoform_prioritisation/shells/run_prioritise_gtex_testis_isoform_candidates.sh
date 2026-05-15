@@ -8,7 +8,7 @@
 set -euo pipefail
 
 WORKDIR="/home/pthorpe001/data/2026_sperm_Gates_transcript_level"
-SCRIPT_DIR="${WORKDIR}/PT_fertility_genomics_transcript/scripts"
+SCRIPT_DIR="${WORKDIR}/PT_fertility_genomics_transcript/shells/gtex_isoform_prioritisation/scripts"
 IN_DIR="${WORKDIR}/results/02_gtex_transcript_isoform_annotation_top3"
 OUT_DIR="${WORKDIR}/results/04_gtex_testis_isoform_prioritisation_top3"
 LOG_DIR="${OUT_DIR}/logs"
