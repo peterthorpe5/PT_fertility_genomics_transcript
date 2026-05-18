@@ -34,7 +34,7 @@ Main outputs
 <prefix>.merge_diagnostics.tsv
     Join diagnostics for each gene-level evidence source.
 
-Formatted Excel copies of the main review tables are written by default.
+Formatted Excel copies of every tabular result are written by default, alongside a combined multi-sheet review workbook.
 """
 
 from __future__ import annotations
@@ -1295,7 +1295,7 @@ def write_formatted_excel(
             integer_format = workbook.add_format({"num_format": "0"})
             float_format = workbook.add_format({"num_format": "0.0000"})
             worksheet.freeze_panes(1, 0)
-            if n_cols > 0:
+            if n_cols > 0 and n_rows > 0:
                 worksheet.add_table(
                     first_row=0,
                     first_col=0,
@@ -1329,6 +1329,176 @@ def write_formatted_excel(
         "Wrote formatted Excel file with %d rows x %d columns to %s",
         n_rows,
         n_cols,
+        path,
+    )
+
+
+def write_excel_output_set(
+    *,
+    outputs: Dict[str, pd.DataFrame],
+    output_paths: Dict[str, Path],
+    diagnostics_frame: pd.DataFrame,
+    prefix: Path,
+    logger: logging.Logger,
+) -> None:
+    """
+    Write formatted Excel copies for every tabular output.
+
+    Individual Excel files are written beside the TSV outputs, using the same
+    basename and an ``.xlsx`` suffix. A combined workbook containing the main
+    review sheets is also written for easier manual inspection.
+
+    Parameters
+    ----------
+    outputs
+        Named output DataFrames.
+    output_paths
+        TSV output paths for the named output DataFrames.
+    diagnostics_frame
+        Merge diagnostics table.
+    prefix
+        Output path prefix.
+    logger
+        Logger instance.
+    """
+    logger.info("Excel output is enabled; writing formatted XLSX files")
+
+    for name, dataframe in outputs.items():
+        if name not in output_paths:
+            logger.warning(
+                "Skipping Excel output for %s because no TSV path is defined",
+                name,
+            )
+            continue
+        xlsx_path = output_paths[name].with_suffix(".xlsx")
+        write_formatted_excel(
+            dataframe=dataframe,
+            path=xlsx_path,
+            sheet_name=name,
+            logger=logger,
+        )
+
+    diagnostics_path = Path(f"{prefix}.merge_diagnostics.xlsx")
+    write_formatted_excel(
+        dataframe=diagnostics_frame,
+        path=diagnostics_path,
+        sheet_name="merge_diagnostics",
+        logger=logger,
+    )
+
+    combined_path = Path(f"{prefix}.review_workbook.xlsx")
+    review_sheets = {
+        "top_review": outputs.get("top_sperm_supported_druggable"),
+        "tier1_rescue": outputs.get("tier1"),
+        "selected_genes": outputs.get("selected_project_genes"),
+        "selected_missing": outputs.get("selected_missing"),
+        "summary": outputs.get("summary"),
+        "merge_diagnostics": diagnostics_frame,
+    }
+    write_combined_formatted_excel(
+        sheets=review_sheets,
+        path=combined_path,
+        logger=logger,
+    )
+
+
+def write_combined_formatted_excel(
+    *,
+    sheets: Dict[str, Optional[pd.DataFrame]],
+    path: Path,
+    logger: logging.Logger,
+) -> None:
+    """
+    Write several review tables to one formatted Excel workbook.
+
+    Parameters
+    ----------
+    sheets
+        Mapping from sheet name to DataFrame. Missing DataFrames are skipped.
+    path
+        Output XLSX path.
+    logger
+        Logger instance.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with pd.ExcelWriter(path=path, engine="xlsxwriter") as writer:
+            workbook = writer.book
+            header_format = workbook.add_format(
+                {
+                    "bold": True,
+                    "text_wrap": True,
+                    "valign": "top",
+                    "border": 1,
+                }
+            )
+            integer_format = workbook.add_format({"num_format": "0"})
+            float_format = workbook.add_format({"num_format": "0.0000"})
+
+            written_sheets = 0
+            used_sheet_names = set()
+            for requested_sheet_name, dataframe in sheets.items():
+                if dataframe is None:
+                    continue
+
+                sheet_name = make_safe_excel_sheet_name(
+                    sheet_name=requested_sheet_name
+                )
+                original_sheet_name = sheet_name
+                suffix = 1
+                while sheet_name in used_sheet_names:
+                    suffix_text = f"_{suffix}"
+                    sheet_name = f"{original_sheet_name[:31 - len(suffix_text)]}{suffix_text}"
+                    suffix += 1
+                used_sheet_names.add(sheet_name)
+
+                dataframe.to_excel(
+                    excel_writer=writer,
+                    sheet_name=sheet_name,
+                    index=False,
+                )
+                worksheet = writer.sheets[sheet_name]
+                n_rows, n_cols = dataframe.shape
+                worksheet.freeze_panes(1, 0)
+
+                if n_cols > 0 and n_rows > 0:
+                    worksheet.add_table(
+                        first_row=0,
+                        first_col=0,
+                        last_row=n_rows,
+                        last_col=n_cols - 1,
+                        options={
+                            "columns": [
+                                {"header": str(column)}
+                                for column in dataframe.columns
+                            ],
+                            "style": "Table Style Medium 2",
+                            "autofilter": True,
+                        },
+                    )
+                worksheet.set_row(0, 30, header_format)
+                column_widths = estimate_excel_column_widths(dataframe=dataframe)
+                for column_index, column in enumerate(dataframe.columns):
+                    if pd.api.types.is_integer_dtype(dataframe[column]):
+                        cell_format = integer_format
+                    elif pd.api.types.is_float_dtype(dataframe[column]):
+                        cell_format = float_format
+                    else:
+                        cell_format = None
+                    worksheet.set_column(
+                        first_col=column_index,
+                        last_col=column_index,
+                        width=column_widths[str(column)],
+                        cell_format=cell_format,
+                    )
+                written_sheets += 1
+    except ImportError as error:
+        logger.warning("Could not write combined Excel output %s: %s", path, error)
+        return
+
+    logger.info(
+        "Wrote combined formatted Excel workbook with %d sheets to %s",
+        written_sheets,
         path,
     )
 
@@ -1750,20 +1920,15 @@ def run(*, config: Config, logger: logging.Logger) -> None:
         )
 
         if config.write_excel_outputs:
-            excel_names = {
-                "full": "all_integrated",
-                "tier1": "tier1_rescue",
-                "top_sperm_supported_druggable": "top_review",
-                "selected_project_genes": "selected_genes",
-                "summary": "summary",
-            }
-            for name, sheet_name in excel_names.items():
-                write_formatted_excel(
-                    dataframe=outputs[name],
-                    path=Path(f"{prefix}.{sheet_name}.xlsx"),
-                    sheet_name=sheet_name,
-                    logger=logger,
-                )
+            write_excel_output_set(
+                outputs=outputs,
+                output_paths=output_paths,
+                diagnostics_frame=diagnostics_frame,
+                prefix=prefix,
+                logger=logger,
+            )
+        else:
+            logger.info("Excel output disabled by --no_write_excel_outputs")
 
     logger.info(
         "Integration finished: %d total rows, %d tier1 rescue rows, %d top review rows",
