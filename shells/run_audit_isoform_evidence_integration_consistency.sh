@@ -2,9 +2,7 @@
 #$ -cwd
 #$ -V
 #$ -N isoform_integration_audit
-#$ -pe smp 1
-#$ -l h_vmem=8G
-#$ -l h_rt=04:00:00
+#$ -pe smp 2
 #$ -j y
 #$ -o logs/isoform_integration_audit.$JOB_ID.log
 

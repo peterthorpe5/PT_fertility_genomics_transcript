@@ -2,9 +2,7 @@
 #$ -cwd
 #$ -V
 #$ -N isoform_peptides
-#$ -pe smp 1
-#$ -l h_vmem=16G
-#$ -l h_rt=08:00:00
+#$ -pe smp 2
 #$ -j y
 #$ -o logs/isoform_peptides.$JOB_ID.log
 
